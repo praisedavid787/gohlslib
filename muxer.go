@@ -181,6 +181,12 @@ type Muxer struct {
 	// This decreases performance, since saving segments on disk is less performant
 	// than saving them on RAM, but allows to preserve RAM.
 	Directory string
+	// FullDVR keeps every segment from stream start in the playlist.
+	// The playlist is marked as EXT-X-PLAYLIST-TYPE:EVENT so players can seek to
+	// the very beginning at any time, even across broadcaster reconnections.
+	// Segments are never deleted — use Directory to store on disk and avoid RAM exhaustion.
+	// It defaults to false.
+	FullDVR bool
 
 	//
 	// callbacks (all optional)
@@ -345,6 +351,7 @@ func (m *Muxer) Start() error {
 			variant:        m.Variant,
 			segmentMaxSize: m.SegmentMaxSize,
 			segmentCount:   m.SegmentCount,
+			fullDVR:        m.FullDVR,
 			onEncodeError:  m.OnEncodeError,
 			mutex:          &m.mutex,
 			cond:           m.cond,
@@ -397,6 +404,7 @@ func (m *Muxer) Start() error {
 				variant:        m.Variant,
 				segmentMaxSize: m.SegmentMaxSize,
 				segmentCount:   m.SegmentCount,
+				fullDVR:        m.FullDVR,
 				onEncodeError:  m.OnEncodeError,
 				mutex:          &m.mutex,
 				cond:           m.cond,
