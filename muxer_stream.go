@@ -90,6 +90,7 @@ type muxerStream struct {
 	variant        MuxerVariant
 	segmentMaxSize uint64
 	segmentCount   int
+	fullDVR        bool
 	onEncodeError  MuxerOnEncodeErrorFunc
 	mutex          *sync.Mutex
 	cond           *sync.Cond
@@ -410,6 +411,11 @@ func (s *muxerStream) generateMediaPlaylistMPEGTS(
 		MediaSequence:  s.segmentDeleteCount,
 	}
 
+	if s.fullDVR {
+		t := playlist.MediaPlaylistType(playlist.MediaPlaylistTypeEvent)
+		pl.PlaylistType = &t
+	}
+
 	for _, s := range s.segments {
 		if seg, ok := s.(*muxerSegmentMPEGTS); ok {
 			uri := seg.path
@@ -439,6 +445,11 @@ func (s *muxerStream) generateMediaPlaylistFMP4(
 		Version:        10,
 		TargetDuration: s.targetDuration,
 		MediaSequence:  s.segmentDeleteCount,
+	}
+
+	if s.fullDVR {
+		t := playlist.MediaPlaylistType(playlist.MediaPlaylistTypeEvent)
+		pl.PlaylistType = &t
 	}
 
 	if s.variant == MuxerVariantLowLatency {
@@ -822,7 +833,7 @@ func (s *muxerStream) rotateSegments(
 		})
 
 	// delete old segments and parts
-	if len(s.segments) > s.segmentCount {
+	if !s.fullDVR && len(s.segments) > s.segmentCount {
 		toDelete := s.segments[0]
 
 		if toDeleteSeg, ok := toDelete.(*muxerSegmentFMP4); ok {
