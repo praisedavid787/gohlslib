@@ -17,9 +17,13 @@ import (
 )
 
 const (
-	clientMaxTracksPerStream    = 10
-	clientMPEGTSSampleQueueSize = 100
-	clientMaxDTSSystemDiff      = 10 * time.Second
+	clientMaxTracksPerStream     = 10
+	clientMPEGTSSampleQueueSize  = 100
+	clientMaxMPEGTSQueuedSamples = 1000
+	clientMaxDTSSystemDiff       = 10 * time.Second
+	clientMaxInboundPlaylistSize = 1 * 1024 * 1024
+	clientMaxInboundSegmentSize  = 100 * 1024 * 1024
+	clientMaxInboundPartSize     = 10 * 1024 * 1024
 )
 
 // ErrClientEOS is returned by Wait() when the stream has ended.
@@ -60,6 +64,9 @@ type ClientOnDataMPEG4AudioFunc func(pts int64, aus [][]byte)
 
 // ClientOnDataOpusFunc is the prototype of the function passed to OnDataOpus().
 type ClientOnDataOpusFunc func(pts int64, packets [][]byte)
+
+// ClientOnDataKLVFunc is the prototype of the function passed to OnDataKLV().
+type ClientOnDataKLVFunc func(pts int64, uni []byte)
 
 func clientAbsoluteURL(base *url.URL, relative string) (*url.URL, error) {
 	u, err := url.Parse(relative)
@@ -244,6 +251,13 @@ func (c *Client) OnDataMPEG4Audio(track *Track, cb ClientOnDataMPEG4AudioFunc) {
 func (c *Client) OnDataOpus(track *Track, cb ClientOnDataOpusFunc) {
 	c.tracks[track].onData = func(pts int64, _ int64, data [][]byte) {
 		cb(pts, data)
+	}
+}
+
+// OnDataKLV sets a callback that is called when data from an KLV track is received.
+func (c *Client) OnDataKLV(track *Track, cb ClientOnDataKLVFunc) {
+	c.tracks[track].onData = func(pts int64, _ int64, data [][]byte) {
+		cb(pts, data[0])
 	}
 }
 

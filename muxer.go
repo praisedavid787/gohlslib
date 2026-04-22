@@ -21,7 +21,6 @@ const (
 	fmp4StartDTS               = 10 * time.Second
 	mpegtsSegmentMinAUCount    = 100
 	multivariantPlaylistMaxAge = "30"
-	initMaxAge                 = "30"
 	segmentMaxAge              = "3600"
 )
 
@@ -560,6 +559,7 @@ func (m *Muxer) WriteKLV(
 }
 
 // Handle handles a HTTP request.
+// This can be safely called in parallel with Write*() and Close() methods.
 func (m *Muxer) Handle(w http.ResponseWriter, r *http.Request) {
 	m.server.handle(w, r)
 }
@@ -611,10 +611,9 @@ func (m *Muxer) rotatePartsInner(nextDTS time.Duration) error {
 func (m *Muxer) rotateSegments(
 	nextDTS time.Duration,
 	nextNTP time.Time,
-	force bool,
 ) error {
 	m.mutex.Lock()
-	err := m.rotateSegmentsInner(nextDTS, nextNTP, force)
+	err := m.rotateSegmentsInner(nextDTS, nextNTP)
 	m.mutex.Unlock()
 
 	if err != nil {
@@ -629,16 +628,15 @@ func (m *Muxer) rotateSegments(
 func (m *Muxer) rotateSegmentsInner(
 	nextDTS time.Duration,
 	nextNTP time.Time,
-	force bool,
 ) error {
-	err := m.leadingStream.rotateSegments(nextDTS, nextNTP, force)
+	err := m.leadingStream.rotateSegments(nextDTS, nextNTP)
 	if err != nil {
 		return err
 	}
 
 	for _, stream := range m.streams {
 		if !stream.isLeading {
-			err = stream.rotateSegments(nextDTS, nextNTP, force)
+			err = stream.rotateSegments(nextDTS, nextNTP)
 			if err != nil {
 				return err
 			}
