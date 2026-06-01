@@ -514,6 +514,9 @@ func (m *Muxer) flushPlaylistsToDisk() {
 	// One media playlist per stream — same content as the per-stream
 	// "{streamID}_stream.m3u8" HTTP endpoint, generated as a non-delta full
 	// playlist so the on-disk file is self-contained.
+	// Also flush the cached fmp4 init file (when present) since the media
+	// playlist's #EXT-X-MAP references it by filename. Without the init file,
+	// players can't decode the fmp4 segments.
 	for _, s := range m.streams {
 		if s.generateMediaPlaylist == nil {
 			continue
@@ -526,6 +529,15 @@ func (m *Muxer) flushPlaylistsToDisk() {
 			continue
 		}
 		_ = os.WriteFile(filepath.Join(m.Directory, mediaPlaylistPath(s.id)), mediaBytes, 0o644)
+
+		// Init file (fmp4 only, populated by generateAndCacheInitFile).
+		if len(s.initFileBytes) > 0 {
+			_ = os.WriteFile(
+				filepath.Join(m.Directory, initFilePath(s.prefix, s.id)),
+				s.initFileBytes,
+				0o644,
+			)
+		}
 	}
 }
 

@@ -114,6 +114,7 @@ type muxerStream struct {
 	nextSegment            muxerSegment
 	nextPart               *muxerPart // low-latency only
 	initFilePresent        bool       // fmp4 only
+	initFileBytes          []byte     // fmp4 only — cached for disk-flush at Close when FullDVR
 	segmentDeleteCount     int
 	closed                 bool
 	targetDuration         int
@@ -604,6 +605,12 @@ func (s *muxerStream) generateAndCacheInitFile() error {
 	}
 
 	initFile := w.Bytes()
+
+	// Cache for later disk-flush in Muxer.Close (FullDVR mode). The init file
+	// is otherwise served only via HTTP — players consuming the on-disk HLS
+	// package after the muxer is gone need this file on disk too, since the
+	// playlist's #EXT-X-MAP references it by filename.
+	s.initFileBytes = initFile
 
 	var contentType string
 	if areAllAudio(s.tracks) {
