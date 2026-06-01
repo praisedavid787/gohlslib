@@ -1,6 +1,7 @@
 package gohlslib
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -528,6 +529,16 @@ func (m *Muxer) flushPlaylistsToDisk() {
 			}
 			continue
 		}
+		// Finalise the on-disk playlist as a VOD package, not a live event:
+		//   • #EXT-X-PLAYLIST-TYPE:EVENT → :VOD so players treat it as a
+		//     complete, fixed-length recording rather than a growing live feed
+		//   • append #EXT-X-ENDLIST so players know no more segments will be
+		//     added — without this they start near the live edge and refuse
+		//     to seek to the beginning
+		// generateMediaPlaylist (used by the live HTTP handler too) emits the
+		// EVENT type during the stream; we rewrite to VOD only on the on-disk
+		// snapshot. Live HTTP playback is unaffected.
+		mediaBytes = finalizePlaylistForVOD(mediaBytes)
 		_ = os.WriteFile(filepath.Join(m.Directory, mediaPlaylistPath(s.id)), mediaBytes, 0o644)
 
 		// Init file (fmp4 only, populated by generateAndCacheInitFile).
@@ -539,6 +550,40 @@ func (m *Muxer) flushPlaylistsToDisk() {
 			)
 		}
 	}
+}
+
+// finalizePlaylistForVOD rewrites a media playlist generated for live
+// (EXT-X-PLAYLIST-TYPE:EVENT, no EXT-X-ENDLIST) into a VOD playlist suitable
+// for replayable archives:
+//
+//   - "#EXT-X-PLAYLIST-TYPE:EVENT" → "#EXT-X-PLAYLIST-TYPE:VOD"
+//   - append "#EXT-X-ENDLIST" if not already present
+//
+// Players use the combination to decide whether to start at the live edge or
+// the beginning, and whether to allow seeking before the live edge.
+//
+// If the playlist lacks the EVENT tag entirely (e.g. a non-FullDVR variant
+// that was unexpectedly routed here) the type substitution is a no-op and the
+// ENDLIST is still appended — both correct for a finalised on-disk snapshot.
+func finalizePlaylistForVOD(b []byte) []byte {
+	// Type swap is one-shot — there should only be one PLAYLIST-TYPE line.
+	const eventTag = "#EXT-X-PLAYLIST-TYPE:EVENT"
+	const vodTag = "#EXT-X-PLAYLIST-TYPE:VOD"
+	if idx := bytes.Index(b, []byte(eventTag)); idx >= 0 {
+		out := make([]byte, 0, len(b)+8)
+		out = append(out, b[:idx]...)
+		out = append(out, []byte(vodTag)...)
+		out = append(out, b[idx+len(eventTag):]...)
+		b = out
+	}
+	// Append ENDLIST if missing. Ensure a trailing newline before it.
+	if !bytes.Contains(b, []byte("#EXT-X-ENDLIST")) {
+		if len(b) > 0 && b[len(b)-1] != '\n' {
+			b = append(b, '\n')
+		}
+		b = append(b, []byte("#EXT-X-ENDLIST\n")...)
+	}
+	return b
 }
 
 // WriteAV1 writes an AV1 temporal unit.
