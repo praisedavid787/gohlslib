@@ -149,8 +149,19 @@ func (s *muxerStream) initialize() error {
 func (s *muxerStream) close() {
 	s.closed = true
 
-	for _, segment := range s.segments {
-		segment.close()
+	// When fullDVR is enabled, the on-disk segments are part of a replayable
+	// archive and the caller (e.g. mediamtx's encoder pipeline) consumes them
+	// after the muxer goes away. Skip the per-segment storage.Remove() that
+	// would otherwise unlink every file on disk. The rolling-window prune
+	// path inside writeSegment (gated on `!s.fullDVR`) is also skipped during
+	// the stream, so the dir already contains the full history.
+	//
+	// When fullDVR is off, behaviour is unchanged — segments are removed,
+	// matching the existing in-memory / rolling-window semantics.
+	if !s.fullDVR {
+		for _, segment := range s.segments {
+			segment.close()
+		}
 	}
 
 	if s.nextPart != nil {
@@ -159,7 +170,11 @@ func (s *muxerStream) close() {
 
 	if s.nextSegment != nil {
 		s.nextSegment.finalize(0) //nolint:errcheck
-		s.nextSegment.close()
+		// Same retention rule for the in-progress segment that's just been
+		// finalised: keep it on disk under fullDVR; remove otherwise.
+		if !s.fullDVR {
+			s.nextSegment.close()
+		}
 	}
 }
 

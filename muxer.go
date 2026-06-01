@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -465,10 +467,23 @@ func (m *Muxer) Start() error {
 }
 
 // Close closes a Muxer.
+//
+// When FullDVR is enabled AND Directory is set, the final media playlists and
+// master playlist are written to disk before close so the on-disk segments form
+// a complete, replayable HLS package after the muxer is gone. Segment files are
+// also retained on disk in that mode — `muxerStream.close()` honours FullDVR
+// and skips per-segment removal.
+//
+// When FullDVR is disabled, behaviour is unchanged: per-segment storage is
+// removed (existing rolling-window semantics).
 func (m *Muxer) Close() {
 	m.mutex.Lock()
 
 	m.closed = true
+
+	if m.FullDVR && m.Directory != "" {
+		m.flushPlaylistsToDisk()
+	}
 
 	for _, stream := range m.streams {
 		stream.close()
@@ -477,6 +492,41 @@ func (m *Muxer) Close() {
 	m.mutex.Unlock()
 
 	m.cond.Broadcast()
+}
+
+// flushPlaylistsToDisk writes the master playlist (index.m3u8) and each
+// stream's media playlist to Muxer.Directory. Called from Close() when FullDVR
+// is enabled so the on-disk HLS package is replayable without the live muxer.
+//
+// Errors are logged via OnEncodeError (if set) but do not block close: the
+// segments are already on disk and the encoder can still rclone-sync them; a
+// missing playlist would only fail the downstream archive consumer, which can
+// fall back to its legacy code path.
+func (m *Muxer) flushPlaylistsToDisk() {
+	// Master playlist — same content the HTTP handler at "index.m3u8" would
+	// have served. No query params at close time.
+	if masterBytes, err := m.generateMultivariantPlaylist(""); err == nil {
+		_ = os.WriteFile(filepath.Join(m.Directory, "index.m3u8"), masterBytes, 0o644)
+	} else if m.OnEncodeError != nil {
+		m.OnEncodeError(err)
+	}
+
+	// One media playlist per stream — same content as the per-stream
+	// "{streamID}_stream.m3u8" HTTP endpoint, generated as a non-delta full
+	// playlist so the on-disk file is self-contained.
+	for _, s := range m.streams {
+		if s.generateMediaPlaylist == nil {
+			continue
+		}
+		mediaBytes, err := s.generateMediaPlaylist(false, "")
+		if err != nil {
+			if m.OnEncodeError != nil {
+				m.OnEncodeError(err)
+			}
+			continue
+		}
+		_ = os.WriteFile(filepath.Join(m.Directory, mediaPlaylistPath(s.id)), mediaBytes, 0o644)
+	}
 }
 
 // WriteAV1 writes an AV1 temporal unit.
